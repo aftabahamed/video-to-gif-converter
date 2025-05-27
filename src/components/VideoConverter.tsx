@@ -26,32 +26,31 @@ export default function VideoConverter() {
   const [isConverting, setIsConverting] = useState(false);
   const [progress, setProgress] = useState(0); // Optional for progress
   const [message, setMessage] = useState<string | null>(null); // For logs or errors
-  const ffmpegRef = useRef(new FFmpeg());
 
-  // --- 1. Load FFMPEG ---
+  // Initialize ref as null. FFmpeg instance will be created in useEffect.
+  const ffmpegRef = useRef<FFmpeg | null>(null);
+
   const loadFfmpeg = async () => {
-    setMessage("Loading FFMPEG.WASM (ffmpeg.wasm)... This may take a moment.");
+    if (!ffmpegRef.current) {
+      // Check if instance exists
+      ffmpegRef.current = new FFmpeg(); // Create instance here
+    }
     const ffmpeg = ffmpegRef.current;
+
+    setMessage("Loading FFMPEG.WASM (ffmpeg.wasm)... This may take a moment.");
+
     ffmpeg.on("log", ({ message: logMessage }) => {
-      // You can parse logMessage to show more structured progress if needed
       console.log(logMessage);
-      setMessage(logMessage); // Display raw FFMPEG logs
+      setMessage(logMessage);
     });
 
     ffmpeg.on("progress", ({ progress: p, time }) => {
       console.log(time, `time`);
-      // Progress is a value between 0 and 1
       setProgress(Math.round(p * 100));
     });
 
     try {
-      // URL for the FFMPEG core files.
-      // Using unpkg CDN. You can also host these files in your `public` folder.
       const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
-      // Note: Using a specific version (0.12.6) as it's known to be stable.
-      // Newer versions (@ffmpeg/core-mt for multi-threaded) might require specific server headers (COOP, COEP).
-      // The single-threaded version (@ffmpeg/core) is generally easier to set up.
-
       await ffmpeg.load({
         coreURL: await toBlobURL(
           `${baseURL}/ffmpeg-core.js`,
@@ -61,7 +60,6 @@ export default function VideoConverter() {
           `${baseURL}/ffmpeg-core.wasm`,
           "application/wasm"
         ),
-        // workerURL: await toBlobURL(`${baseURL}/ffmpeg-core.worker.js`, 'text/javascript'), // For multi-threaded
       });
       setFfmpegLoaded(true);
       setMessage("FFMPEG loaded successfully!");
@@ -73,9 +71,13 @@ export default function VideoConverter() {
   };
 
   useEffect(() => {
-    loadFfmpeg();
+    // This effect runs only on the client side
+    if (!ffmpegRef.current) {
+      // Ensure it's only called once or if not loaded
+      loadFfmpeg();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Load FFMPEG on component mount
+  }, []); // Empty dependency array ensures this runs once on mount
 
   // --- 2. Handle File Input ---
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -90,7 +92,7 @@ export default function VideoConverter() {
 
   // --- 3. Conversion Logic ---
   const convertToGif = async () => {
-    if (!ffmpegLoaded) {
+    if (!ffmpegRef.current || !ffmpegLoaded) {
       setMessage("FFMPEG is not loaded yet. Please wait.");
       return;
     }
@@ -155,6 +157,7 @@ export default function VideoConverter() {
   };
 
   return (
+    // Your JSX remains the same
     <Card className="w-full max-w-lg mx-auto">
       <CardHeader>
         <CardTitle>Video to GIF Converter</CardTitle>
@@ -163,7 +166,7 @@ export default function VideoConverter() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {!ffmpegLoaded && message && (
+        {(!ffmpegLoaded || message?.includes("Loading FFMPEG")) && message && (
           <Alert
             variant={message?.startsWith("Error") ? "destructive" : "default"}
           >
@@ -200,11 +203,11 @@ export default function VideoConverter() {
           </>
         )}
 
-        {(isConverting || progress > 0) && ffmpegLoaded && (
+        {(isConverting || (progress > 0 && progress < 100)) && ffmpegLoaded && (
           <div className="space-y-2">
             <Label>{isConverting ? "Converting..." : "Progress"}</Label>
             <Progress value={progress} className="w-full" />
-            {message && (
+            {message && !message.startsWith("FFMPEG loaded successfully!") && (
               <p className="text-sm text-muted-foreground">{message}</p>
             )}
           </div>
@@ -228,6 +231,21 @@ export default function VideoConverter() {
             </Button>
           </div>
         )}
+        {ffmpegLoaded &&
+          message &&
+          !message.includes("Loading FFMPEG") &&
+          !isConverting &&
+          progress === 100 && (
+            <Alert
+              variant={message?.startsWith("Error") ? "destructive" : "default"}
+              className="mt-4"
+            >
+              <AlertTitle>
+                {message?.startsWith("Error") ? "Error" : "Status"}
+              </AlertTitle>
+              <AlertDescription>{message}</AlertDescription>
+            </Alert>
+          )}
       </CardContent>
       <CardFooter className="justify-center">
         <p className="text-xs text-muted-foreground">
